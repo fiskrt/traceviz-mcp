@@ -1,0 +1,25 @@
+[project]
+name = "traceviz-mcp"
+version = "0.1.0"
+description = "MCP server that renders NPU profiler trace timelines as images for LLMs"
+readme = "traceviz/README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "mcp>=1.2.0",
+    "numpy>=1.24",
+    "matplotlib>=3.6",
+]
+
+[project.scripts]
+# Console entry point used by `uvx --from git+... traceviz-mcp` and `claude mcp add`.
+traceviz-mcp = "traceviz.mcp_server:main"
+# Optional plain CLI for shell use.
+traceviz = "traceviz.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["traceviz"]

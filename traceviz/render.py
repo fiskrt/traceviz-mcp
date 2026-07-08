@@ -57,31 +57,44 @@ def _rgb(hex_color: str) -> tuple[float, float, float]:
     return tuple(int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
 
 
-def interval_union_ns(
-    ts: np.ndarray, dur: np.ndarray, t0: float, t1: float
-) -> float:
-    """Exact busy time = length of the union of event intervals within [t0,t1].
+def busy_and_segments(
+    ts: np.ndarray, dur: np.ndarray, t0: float, t1: float, gap: float = 0.0
+) -> tuple[float, int]:
+    """Union busy time and number of contiguous busy runs within [t0,t1].
 
     Summing durations double-counts events that overlap in time (multiple
     sub-threads collapsed onto one engine lane), which can push naive "busy"
-    past 100%. Merging intervals gives the true occupied time.
+    past 100%. Merging intervals gives the true occupied time; counting the
+    merged runs gives the fragmentation basis — many tiny events packed into one
+    run render as a solid block yet are individually schedulable/coalescable.
+
+    ``gap`` treats events separated by <= gap ns as part of the same run.
     """
     if ts.size == 0:
-        return 0.0
+        return 0.0, 0
     s = np.clip(ts, t0, t1)
     e = np.clip(ts + dur, t0, t1)
     order = np.argsort(s, kind="stable")
     s, e = s[order], e[order]
     total = 0.0
+    segments = 1
     cur_s, cur_e = s[0], e[0]
     for i in range(1, s.size):
-        if s[i] > cur_e:
+        if s[i] > cur_e + gap:
             total += cur_e - cur_s
+            segments += 1
             cur_s, cur_e = s[i], e[i]
         elif e[i] > cur_e:
             cur_e = e[i]
     total += cur_e - cur_s
-    return float(total)
+    return float(total), segments
+
+
+def interval_union_ns(
+    ts: np.ndarray, dur: np.ndarray, t0: float, t1: float
+) -> float:
+    """Exact busy time = length of the union of event intervals within [t0,t1]."""
+    return busy_and_segments(ts, dur, t0, t1)[0]
 
 
 def pick_time_unit(span_ns: float) -> tuple[float, str]:
@@ -132,6 +145,12 @@ class RowStat:
     busy_ns: float
     busy_pct: float
     n_events: int
+    n_segments: int         # contiguous busy runs (fewer than n_events => fragmented)
+    mean_op_ns: float       # average per-event duration in the window
+
+    @property
+    def ops_per_segment(self) -> float:
+        return self.n_events / self.n_segments if self.n_segments else 0.0
 
 
 def _selected_rows(
@@ -194,9 +213,12 @@ def render_timeline(
         ts_r, dur_r = td.ts[m], td.dur[m]
         eng_r = td.engine_i[m]
 
-        busy = interval_union_ns(ts_r, dur_r, t0, t1)
+        busy, n_seg = busy_and_segments(ts_r, dur_r, t0, t1)
+        clipped = np.clip(ts_r + dur_r, t0, t1) - np.clip(ts_r, t0, t1)
+        mean_op = float(clipped.mean()) if ts_r.size else 0.0
         row_stats.append(
-            RowStat(unit, engine or "*", busy, 100.0 * busy / span, int(ts_r.size))
+            RowStat(unit, engine or "*", busy, 100.0 * busy / span,
+                    int(ts_r.size), n_seg, mean_op)
         )
 
         typical_px = (np.median(dur_r) * px_per_ns) if ts_r.size else 0.0

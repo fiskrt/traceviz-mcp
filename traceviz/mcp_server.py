@@ -28,6 +28,7 @@ from pydantic import Field
 
 from .loader import find_trace_json, load_trace
 from .render import pairwise_overlap, render_timeline
+from .stats import fragmentation_report
 
 mcp = FastMCP(
     "traceviz",
@@ -36,9 +37,11 @@ mcp = FastMCP(
         "run the profiler, pass the resulting OPPROF_* directory as `path` (it is "
         "required on every call, since each run is a new directory). Call "
         "describe_trace first to learn the valid core and metric names and the "
-        "time span, then render_timeline for an image or overlap for a "
-        "busy-overlap number. Cores look like 'core2.veccore1'; metrics are "
-        "engine/pipe classes like SCALAR, VECTOR, CUBE, MTE2, MTE3. Times are ns."
+        "time span, then render_timeline for an image, overlap for a busy-overlap "
+        "number, or fragmentation to find lanes that are many tiny ops which could "
+        "be coalesced (a solid-looking block is often hundreds of small reads). "
+        "Cores look like 'core2.veccore1'; metrics are engine/pipe classes like "
+        "SCALAR, VECTOR, CUBE, MTE2, MTE3. Times are ns."
     ),
 )
 
@@ -76,12 +79,16 @@ def _window(td, start_ns, end_ns):
 def _summary_text(summary: dict) -> str:
     lines = [
         f"Timeline · {len(summary['rows'])} lanes · "
-        f"span {summary['span_ns']:.3f} ns (axis in {summary['time_unit']})",
+        f"span {summary['span_ns']:.3f} ns (axis in {summary['time_unit']}). "
+        "A lane can look solid yet be many tiny ops — see events/runs.",
     ]
     for r in sorted(summary["rows"], key=lambda x: -x["busy_pct"]):
+        ops_per_run = r["n_events"] / r["n_segments"] if r["n_segments"] else 0.0
+        frag = "  << fragmented" if ops_per_run >= 8 and r["n_events"] >= 16 else ""
         lines.append(
             f"  {r['unit']}/{r['engine']}: busy {r['busy_pct']:.1f}% "
-            f"({r['busy_ns']:.3f} ns, {r['n_events']} events)"
+            f"({r['busy_ns']:.3f} ns); {r['n_events']} events in {r['n_segments']} "
+            f"runs = {ops_per_run:.0f} ops/run, mean {r['mean_op_ns']:.4f} ns/op{frag}"
         )
     return "\n".join(lines)
 
@@ -168,6 +175,35 @@ def overlap(
     window = _window(td, start_ns, end_ns)
     stats = pairwise_overlap(td, parse(lane_a), parse(lane_b), window=window)
     return json.dumps(stats, indent=2)
+
+
+@mcp.tool()
+def fragmentation(
+    path: Annotated[str, Field(description="The OPPROF_* directory of the run to analyse.")],
+    cores: Annotated[list[str] | None, Field(description="Cores to include. Omit for all.")] = None,
+    metrics: Annotated[list[str] | None, Field(description="Engine/pipe classes to include, e.g. ['MTE2']. Omit for all.")] = None,
+    start_ns: Annotated[float | None, Field(description="Window start in nanoseconds (optional).")] = None,
+    end_ns: Annotated[float | None, Field(description="Window end in nanoseconds (optional).")] = None,
+    merge_gap_ns: Annotated[float, Field(description="Events separated by <= this many ns count as one contiguous run.")] = 0.0,
+    limit: Annotated[int | None, Field(description="Return only the N most-fragmented lanes.")] = None,
+) -> str:
+    """Find coalescing opportunities: lanes that are many tiny ops, not few big ones.
+
+    A lane may render as a solid busy block while actually being hundreds of
+    small back-to-back operations (e.g. many small MTE2 reads) that could be
+    fused. This merges each lane's events into contiguous runs and ranks lanes by
+    `ops_per_segment` (events per solid-looking block). For each lane it reports
+    `n_events`, `n_segments`, `coalescable_ops` (events removable if each run were
+    one op), per-op duration stats, and the top repeated op mnemonics (what to
+    fuse). Most fragmented lanes first.
+    """
+    td = _load(path)
+    window = _window(td, start_ns, end_ns)
+    report = fragmentation_report(
+        td, units=cores, metrics=metrics, window=window,
+        merge_gap_ns=merge_gap_ns, limit=limit,
+    )
+    return json.dumps(report, indent=2)
 
 
 def main() -> None:

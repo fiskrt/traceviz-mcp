@@ -11,43 +11,30 @@ The LLM follows these steps:
 ---
 
 The MCP allows for more fine-grained access, for example:
-LLM saw a inbalance in cores, so it want to see how core 7 vector core 2 was improved in MTE2 access.
+LLM saw an inbalance in cores, so it want to see how core 7 vector core 2 was improved in MTE2 access.
 The mcp will then return an timeline image over just these MTE2 acess on core 7 vector core 2.
 
 ----
 
-Turn OPPROF (Ascend-style NPU simulator) profiler output into timeline images and
-overlap statistics. Built for the inner loop of performance work: **edit code → run
-the profiler → analyse the run with these tools → act on the findings → repeat.**
-It exposes an MCP server so a model can ask *"show a timeline of the two cube cores
-and vec0.1 / vec1.0 between 30 and 40 ns"* and get back a legible PNG plus the
-underlying numbers.
-
-Each profiler run writes a fresh, timestamped `OPPROF_*` directory. Every tool
-therefore takes that directory as a required `path` argument — there is no default
-trace, so an old run can never be analysed by accident.
-
-Dependencies are just `numpy` and `matplotlib` (Agg backend, no display, no
-pandas), so it runs headless anywhere.
 
 ---
 
-## Install into Claude Code
+## Install mcp into Claude Code
 
-**Prerequisite:** [`uv`](https://docs.astral.sh/uv/) (provides `uvx`). If you don't have it:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-**Add the server.** `uvx` builds and runs the package straight from Git — no clone,
-no virtualenv to manage:
+`uvx` builds and runs the package straight from git:
 
 ```bash
 claude mcp add traceviz -- uvx --from git+https://github.com/<you>/<repo> traceviz-mcp
+# if you are missing uv package manager, install it:
+# curl -LsSf https://astral.sh/uv/install.sh | sh
+# if you already cloned the repo you can install from a path:
+# claude mcp add traceviz -- uvx --from /abs/path/to/repo traceviz-mcp
 ```
 
-The model passes the `path` of the run it just produced to each tool.
+Traceviz parses and renders the timelines from `trace.json` and the `visualize_data.bin` without any 3p deps.
+
 
 **Scope** (where the server registration lives) is controlled with `-s`:
 
@@ -67,11 +54,6 @@ claude mcp remove traceviz # uninstall
 
 Inside a session, `/mcp` lists connected servers and their tools.
 
-**Local checkout** instead of Git (for development):
-
-```bash
-claude mcp add traceviz -- uvx --from /abs/path/to/repo traceviz-mcp
-```
 
 ### Tools the model sees
 
@@ -80,6 +62,7 @@ claude mcp add traceviz -- uvx --from /abs/path/to/repo traceviz-mcp
 | `describe_trace` | Return the valid **cores**, **metrics**, and time span. The model calls this first to learn what it can request. |
 | `render_timeline_image` | Render a timeline of chosen cores × metrics over an optional time window; returns a text busy-summary and a PNG. |
 | `overlap` | Report how much two `core/metric` lanes are busy at the same time. |
+| `fragmentation` | Rank lanes by ops-per-run — find solid-looking blocks that are actually many tiny ops worth coalescing. |
 
 See [Tool reference](#tool-reference) below for exact arguments and return values.
 
@@ -182,13 +165,21 @@ Reading it: overlapping colored regions across lanes mean those engines/cores ar
 busy simultaneously. Long white stretches are stalls. That's the "how's the
 overlap" story at a glance; `overlap` / `pairwise_overlap` give you the number.
 
+**What the image can't show — fragmentation.** A solid-looking busy block may be
+one large operation or a thousand tiny back-to-back ones; at the pixel level they
+are identical. That distinction matters because many small ops (e.g. lots of
+little MTE2 reads) carry per-instruction overhead that fusing them removes. So
+fragmentation is reported numerically, not drawn: the render summary annotates
+each lane with `events in N runs = ops/run`, and the `fragmentation` tool ranks
+lanes by it. See below.
+
 ---
 
 ## Tool reference
 
 MCP tool → underlying Python function. Times are always nanoseconds.
 
-All three tools take `path` (the OPPROF_* run directory) as a required first
+Every tool takes `path` (the OPPROF_* run directory) as a required first
 argument.
 
 ### `describe_trace(path) -> str` (JSON)
@@ -211,10 +202,12 @@ Render a timeline. Backed by `render.render_timeline`.
 | `start_ns`, `end_ns` | full span | Time window; give either or both to zoom. |
 | `aggregate` | `"row"` | `"row"` = one lane per core+metric; `"unit"` = one lane per core. |
 
-Returns a two-part MCP response: a text summary listing each lane's busy % and
-event count, followed by the PNG. The Python function `render_timeline` returns
-the summary as a dict (`out_path`, `window_ns`, `span_ns`, `time_unit`, and a
-`rows` list of `{unit, engine, busy_ns, busy_pct, n_events}`).
+Returns a two-part MCP response: a text summary followed by the PNG. Each lane in
+the summary reports busy %, event count, contiguous-run count, ops/run, and mean
+op duration (fragmented lanes are flagged). The Python function `render_timeline`
+returns the summary as a dict (`out_path`, `window_ns`, `span_ns`, `time_unit`,
+and a `rows` list of `{unit, engine, busy_ns, busy_pct, n_events, n_segments,
+mean_op_ns}`).
 
 > **Busy %** is the *union* of event intervals in the lane, not the sum, so lanes
 > where sub-threads overlap never exceed 100%.
@@ -227,34 +220,134 @@ How much two lanes are busy at the same time. Each lane is `"core/metric"`
 Returns: `busy_a_ns`, `busy_b_ns`, `overlap_ns`, and the overlap as a percentage
 of lane A's busy time, lane B's busy time, and the whole window.
 
+### `fragmentation(path, cores=None, metrics=None, start_ns=None, end_ns=None, merge_gap_ns=0.0, limit=None) -> str` (JSON)
+
+Find coalescing opportunities — lanes that are many small ops rather than a few
+large ones. Backed by `stats.fragmentation_report`. Merges each lane's events into
+contiguous busy runs and ranks lanes, most fragmented first.
+
+| Argument | Default | Meaning |
+|----------|---------|---------|
+| `merge_gap_ns` | `0.0` | Events separated by ≤ this gap count as one run (so near-contiguous regions score as solid). |
+| `limit` | all | Keep only the N most-fragmented lanes. |
+
+Per lane it returns: `n_events`, `n_segments` (contiguous runs), `ops_per_segment`
+(events per solid-looking block — the headline fragmentation number),
+`coalescable_ops` (`n_events − n_segments`, i.e. how many ops could be removed if
+each run were one op), per-op duration stats (`mean/median/min/max_op_ns`),
+`distinct_ops`, and `top_ops` (the most frequent mnemonics — *what* to fuse).
+
+Example: an MTE2 lane reporting `n_events: 973, n_segments: 1, ops_per_segment:
+973` looks like one clean block but is 973 tiny reads that could collapse to one
+transfer.
+
 ---
 
-## Command-line use
+## Feature gallery
 
-The same functionality without MCP. Run from the repo root (needs `numpy` +
-`matplotlib` on your Python).
+Every feature below is a real command against the bundled sample, run from the
+repo root, with its actual output. Images are written to `out/img/` (regenerate
+any of them by re-running its command).
 
 ```bash
 SAMPLE=OPPROF_20260707154004_XZPYWIDKXUKKJVTX
+```
 
-# What's in the trace (units, metrics, span, lane names) as JSON
+### `--list` / `describe_trace` — what's in the run
+
+```bash
 python3 -m traceviz.cli $SAMPLE --list
+```
 
-# Overview: one lane per core, all 24 at once
-python3 -m traceviz.cli $SAMPLE --aggregate unit --out out/overview.png
+```json
+{
+  "units": ["core0.veccore0", "core1.veccore1", ... 24 total],
+  "engines": ["SCALAR", "VECTOR", "FLOWCTRL", "MTE2", "MTE3", "ALL", "CACHEMISS", "FIXP", "MTE1", "CUBE"],
+  "span_ns": 18.285,
+  "n_events": 68112,
+  "lanes": ["core0.cubecore0/ALL", ...]
+}
+```
 
-# Compare two cores across their key metrics
+### Overview — one lane per core, all 24 at once
+
+```bash
+python3 -m traceviz.cli $SAMPLE --aggregate unit --out out/img/overview.png
+```
+
+![overview](../out/img/overview.png)
+
+### Compare cores across metrics
+
+```bash
 python3 -m traceviz.cli $SAMPLE \
     --units core2.veccore1 core1.veccore0 \
     --engines SCALAR VECTOR MTE2 MTE3 \
-    --out out/query.png
+    --out out/img/compare.png
+```
 
-# Zoom to a time window (ns); axis units adapt automatically
-python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 --window 26 30 --out out/win.png
+![compare](../out/img/compare.png)
 
-# Overlap statistics between two lanes (JSON, no image)
+### Fine-grained — a single core's single metric
+
+The loop's "zoom in on one thing" case, e.g. *how does core7.veccore1's MTE2
+access look?*
+
+```bash
+python3 -m traceviz.cli $SAMPLE --units core7.veccore1 --engines MTE2 --out out/img/finegrained.png
+```
+
+![finegrained](../out/img/finegrained.png)
+
+### Zoom to a time window
+
+`--window T0 T1` in nanoseconds; the x-axis unit adapts to the span shown.
+
+```bash
+python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 \
+    --engines SCALAR CUBE MTE2 --window 26 32 --out out/img/zoom.png
+```
+
+![zoom](../out/img/zoom.png)
+
+### Overlap — how much two lanes run at the same time (JSON)
+
+```bash
 python3 -m traceviz.cli $SAMPLE --overlap core2.veccore1/VECTOR core1.veccore0/VECTOR
 ```
+
+```json
+{
+  "lane_a": "core2.veccore1/VECTOR",
+  "lane_b": "core1.veccore0/VECTOR",
+  "busy_a_ns": 6.487, "busy_b_ns": 6.486,
+  "overlap_ns": 6.467,
+  "overlap_pct_of_a": 99.69, "overlap_pct_of_b": 99.71,
+  "overlap_pct_of_window": 35.37
+}
+```
+
+### Fragmentation — find coalescing opportunities (JSON)
+
+```bash
+python3 -m traceviz.cli $SAMPLE --engines MTE2 --fragmentation
+```
+
+```json
+// most-fragmented lane first
+{
+  "lane": "core0.veccore0/MTE2",
+  "n_events": 34,
+  "n_segments": 8,
+  "ops_per_segment": 4.25,
+  "coalescable_ops": 26,
+  "mean_op_ns": 0.407,
+  "distinct_ops": 1,
+  "top_ops": [{"op": "MOV_SRC_TO_DST_ALIGN", "count": 34}]
+}
+```
+
+### CLI flags
 
 | Flag | Meaning |
 |------|---------|
@@ -266,6 +359,8 @@ python3 -m traceviz.cli $SAMPLE --overlap core2.veccore1/VECTOR core1.veccore0/V
 | `--aggregate {row,unit}` | Lane per core+metric, or lane per core. |
 | `--width PX` | Output width (default 1600). |
 | `--overlap A/E B/E` | Print overlap stats for two lanes and exit. |
+| `--fragmentation` | Rank lanes by ops-per-run (coalescing opportunities) and exit. |
+| `--merge-gap NS` | Events within NS count as one run (for `--fragmentation`). |
 | `--list` | Print units/metrics/lanes and exit. |
 
 ---
@@ -297,6 +392,7 @@ stats = pairwise_overlap(
 |--------|----------------|
 | `model.py` | `TraceData` (columnar event store) and `InstrTable`. |
 | `loader.py` | Parse `trace.json` and the `.bin` instruction table into a `TraceData`. |
-| `render.py` | Scale-adaptive `render_timeline` and `pairwise_overlap`. |
+| `render.py` | Scale-adaptive `render_timeline`, `pairwise_overlap`, and `busy_and_segments`. |
+| `stats.py` | Fragmentation analysis (`lane_fragmentation`, `fragmentation_report`). |
 | `cli.py` | Command-line entry point (`python -m traceviz.cli`). |
-| `mcp_server.py` | MCP server exposing the three tools (`traceviz-mcp`). |
+| `mcp_server.py` | MCP server exposing the four tools (`traceviz-mcp`). |

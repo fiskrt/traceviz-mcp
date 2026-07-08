@@ -18,6 +18,7 @@ import sys
 
 from .loader import load_trace
 from .render import pairwise_overlap, render_timeline
+from .stats import fragmentation_report
 
 
 def _parse_lane(s: str) -> tuple[str, str]:
@@ -41,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--title", default=None)
     ap.add_argument("--overlap", nargs=2, type=_parse_lane, metavar=("A", "B"),
                     help="print overlap stats for two UNIT/ENGINE lanes and exit")
+    ap.add_argument("--fragmentation", action="store_true",
+                    help="rank lanes by ops-per-run (coalescing opportunities) and exit")
+    ap.add_argument("--merge-gap", type=float, default=0.0,
+                    help="events within this many ns count as one run (fragmentation)")
     ap.add_argument("--list", action="store_true", help="list units/engines and exit")
     args = ap.parse_args(argv)
 
@@ -59,6 +64,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.overlap:
         stats = pairwise_overlap(td, args.overlap[0], args.overlap[1], window=window)
         print(json.dumps(stats, indent=2))
+        return 0
+
+    if args.fragmentation:
+        report = fragmentation_report(
+            td, units=args.units, metrics=args.engines, window=window,
+            merge_gap_ns=args.merge_gap,
+        )
+        print(json.dumps(report, indent=2))
         return 0
 
     summary = render_timeline(

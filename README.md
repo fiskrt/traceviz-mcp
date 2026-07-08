@@ -2,11 +2,24 @@
 
 Give profiling timeline accuess to the **auto-research loop**.
 
+
 The LLM loops like:
 1. Make change in code that it suspect improves the pipelining
 2. Run profiler which creates a trace
 3. Uses `traceviz` mcp to visualize the timeline relevant to the change made
 4. Analyses timeline output from mcp and determines uses this information and return to step 1.
+
+Add to claude: `claude mcp add traceviz -- uvx --from git+https://github.com/fiskrt/traceviz-mcp traceviz-mcp`
+
+<details>
+
+<summary>Why do we need an mcp?</summary>
+
+Tridionally for the model to understand profiling traces it must either
+1) use powerful programs like msprof to visualize the traces, which is clunky, as the trace formats are actually simple to parse and visualize (c.f. `parser.py`, `render.py`).
+2) Or the LLM would have to navigate 100k LoC json files and binaries on its own which pollutes context and sidetracks the model.
+
+</details>
 
 ## Questions the mcp can answer
 
@@ -103,7 +116,7 @@ python3 -m traceviz.cli $SAMPLE --engines MTE2 --fragmentation
 ---
 
 
-## Install mcp into Claude Code
+## Install the mcp into Claude Code
 
 `uvx` builds and runs the package straight from git:
 
@@ -113,15 +126,17 @@ claude mcp add traceviz -- uvx --from git+https://github.com/<you>/<repo> tracev
 # curl -LsSf https://astral.sh/uv/install.sh | sh
 # if you already cloned the repo you can install from a path:
 # claude mcp add traceviz -- uvx --from /abs/path/to/repo traceviz-mcp
+```
+
+### MCP basics
+
+```bash
 claude mcp list            # is it registered?
 claude mcp get traceviz    # show its config
 claude mcp remove traceviz # uninstall
 ```
 
 Inside a session, `/mcp` lists connected servers and their tools.
-
-Traceviz parses and renders the timelines from `trace.json` and the `visualize_data.bin` without any 3p deps.
-
 
 **Scope** (where the server registration lives) is controlled with `-s`:
 
@@ -130,8 +145,6 @@ Traceviz parses and renders the timelines from `trace.json` and the `visualize_d
 | `-s local` (default) | Only you, only this project. |
 | `-s project` | Committed to `.mcp.json` and shared with the repo. |
 | `-s user` | Available to you across all projects. |
-
-
 
 
 ### Tools the model sees

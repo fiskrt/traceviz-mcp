@@ -1,8 +1,8 @@
 # traceviz
 
-The goal is to have the auto-research loop access profiling timelines easier.
+Give profiling timeline accuess to the **auto-research loop**.
 
-The LLM follows these steps:
+The LLM loops like:
 1. Make change in code that it suspect improves the pipelining
 2. Run profiler which creates a trace
 3. Uses `traceviz` mcp to visualize the timeline relevant to the change made
@@ -14,10 +14,7 @@ The LLM follows these steps:
 ### Show an overview of the most important metrics for core2 vec1 and core1 vec0
 
 ```bash
-python3 -m traceviz.cli $SAMPLE \
-    --units core2.veccore1 core1.veccore0 \
-    --engines SCALAR VECTOR MTE2 MTE3 \
-    --out out/img/compare.png
+python3 -m traceviz.cli $SAMPLE --units core2.veccore1 core1.veccore0 --engines SCALAR VECTOR MTE2 MTE3 --out out/img/compare.png
 ```
 
 ![compare](img/compare.png)
@@ -37,8 +34,7 @@ python3 -m traceviz.cli $SAMPLE --units core7.veccore1 --engines MTE2 --out out/
 `--window T0 T1` in nanoseconds; the x-axis unit adapts to the span shown.
 
 ```bash
-python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 \
-    --engines SCALAR CUBE MTE2 --window 26 32 --out out/img/zoom.png
+python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 --engines SCALAR CUBE MTE2 --window 26 32 --out out/img/zoom.png
 ```
 
 ![zoom](img/zoom.png)
@@ -117,7 +113,12 @@ claude mcp add traceviz -- uvx --from git+https://github.com/<you>/<repo> tracev
 # curl -LsSf https://astral.sh/uv/install.sh | sh
 # if you already cloned the repo you can install from a path:
 # claude mcp add traceviz -- uvx --from /abs/path/to/repo traceviz-mcp
+claude mcp list            # is it registered?
+claude mcp get traceviz    # show its config
+claude mcp remove traceviz # uninstall
 ```
+
+Inside a session, `/mcp` lists connected servers and their tools.
 
 Traceviz parses and renders the timelines from `trace.json` and the `visualize_data.bin` without any 3p deps.
 
@@ -130,15 +131,7 @@ Traceviz parses and renders the timelines from `trace.json` and the `visualize_d
 | `-s project` | Committed to `.mcp.json` and shared with the repo. |
 | `-s user` | Available to you across all projects. |
 
-**Verify and manage:**
 
-```bash
-claude mcp list            # is it registered?
-claude mcp get traceviz    # show its config
-claude mcp remove traceviz # uninstall
-```
-
-Inside a session, `/mcp` lists connected servers and their tools.
 
 
 ### Tools the model sees

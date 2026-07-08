@@ -2,7 +2,7 @@
 name = "traceviz-mcp"
 version = "0.1.0"
 description = "MCP server that renders NPU profiler trace timelines as images for LLMs"
-readme = "traceviz/README.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [

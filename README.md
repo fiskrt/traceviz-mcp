@@ -27,7 +27,7 @@ Tridionally for the model to understand profiling traces it must either
 ### Show an overview of the most important metrics for core2 vec1 and core1 vec0
 
 ```bash
-python3 -m traceviz.cli $SAMPLE --units core2.veccore1 core1.veccore0 --engines SCALAR VECTOR MTE2 MTE3 --out out/img/compare.png
+python3 -m traceviz.cli $SAMPLE --units core2.veccore1 core1.veccore0 --engines SCALAR VECTOR MTE2 MTE3 --out img/compare.png
 ```
 
 ![compare](img/compare.png)
@@ -37,7 +37,7 @@ python3 -m traceviz.cli $SAMPLE --units core2.veccore1 core1.veccore0 --engines 
 The loop's "zoom in on one thing" and analyse it:
 
 ```bash
-python3 -m traceviz.cli $SAMPLE --units core7.veccore1 --engines MTE2 --out out/img/finegrained.png
+python3 -m traceviz.cli $SAMPLE --units core7.veccore1 --engines MTE2 --out img/finegrained.png
 ```
 
 ![finegrained](img/finegrained.png)
@@ -47,7 +47,7 @@ python3 -m traceviz.cli $SAMPLE --units core7.veccore1 --engines MTE2 --out out/
 `--window T0 T1` in nanoseconds; the x-axis unit adapts to the span shown.
 
 ```bash
-python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 --engines SCALAR CUBE MTE2 --window 26 32 --out out/img/zoom.png
+python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 --engines SCALAR CUBE MTE2 --window 26 32 --out img/zoom.png
 ```
 
 ![zoom](img/zoom.png)
@@ -55,7 +55,7 @@ python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 --engines SCALAR CUBE MT
 ### Can you just show me a combined one lane per core overview for all cores?
 
 ```bash
-python3 -m traceviz.cli $SAMPLE --aggregate unit --out out/img/overview.png
+python3 -m traceviz.cli $SAMPLE --aggregate unit --out img/overview.png
 ```
 
 ![overview](img/overview.png)
@@ -338,7 +338,7 @@ transfer.
 ## Feature gallery
 
 Every feature below is a real command against the bundled sample, run from the
-repo root, with its actual output. Images are written to `out/img/` (regenerate
+repo root, with its actual output. Images are written to `img/` (regenerate
 any of them by re-running its command).
 
 ```bash

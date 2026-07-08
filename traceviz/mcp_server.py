@@ -33,8 +33,8 @@ from .stats import fragmentation_report
 mcp = FastMCP(
     "traceviz",
     instructions=(
-        "Analyse an NPU profiler (OPPROF) run while iterating on code. After you "
-        "run the profiler, pass the resulting OPPROF_* directory as `path` (it is "
+        "Analyse a msprof simulator trace (OPPROF) run while iterating on code. After "
+        "profiler has been ran, pass the resulting OPPROF_* directory as `path` (it is "
         "required on every call, since each run is a new directory). Call "
         "describe_trace first to learn the valid core and metric names and the "
         "time span, then render_timeline for an image, overlap for a busy-overlap "

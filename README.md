@@ -275,7 +275,7 @@ python3 -m traceviz.cli $SAMPLE --list
 python3 -m traceviz.cli $SAMPLE --aggregate unit --out out/img/overview.png
 ```
 
-![overview](../out/img/overview.png)
+![overview](img/overview.png)
 
 ### Compare cores across metrics
 
@@ -286,7 +286,7 @@ python3 -m traceviz.cli $SAMPLE \
     --out out/img/compare.png
 ```
 
-![compare](../out/img/compare.png)
+![compare](img/compare.png)
 
 ### Fine-grained — a single core's single metric
 
@@ -297,7 +297,7 @@ access look?*
 python3 -m traceviz.cli $SAMPLE --units core7.veccore1 --engines MTE2 --out out/img/finegrained.png
 ```
 
-![finegrained](../out/img/finegrained.png)
+![finegrained](img/finegrained.png)
 
 ### Zoom to a time window
 
@@ -308,7 +308,7 @@ python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 \
     --engines SCALAR CUBE MTE2 --window 26 32 --out out/img/zoom.png
 ```
 
-![zoom](../out/img/zoom.png)
+![zoom](img/zoom.png)
 
 ### Overlap — how much two lanes run at the same time (JSON)
 

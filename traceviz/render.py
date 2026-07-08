@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Patch
 
-from .model import TraceData
+from .model import AGGREGATE_ENGINES, TraceData
 
 # Below this width a bar is not worth drawing individually -> use occupancy mode.
 MIN_BAR_PX = 2.0
@@ -97,6 +97,57 @@ def interval_union_ns(
     return busy_and_segments(ts, dur, t0, t1)[0]
 
 
+def merged_intervals(
+    ts: np.ndarray, dur: np.ndarray, t0: float, t1: float
+) -> np.ndarray:
+    """Clipped, sorted, merged busy intervals within [t0,t1] as an (m,2) array.
+
+    Overlapping/adjacent events on the same lane are unioned, so the result is a
+    set of disjoint [start,end) intervals — the exact busy footprint.
+    """
+    empty = np.empty((0, 2), dtype=np.float64)
+    if ts.size == 0:
+        return empty
+    s = np.clip(ts, t0, t1)
+    e = np.clip(ts + dur, t0, t1)
+    keep = e > s
+    s, e = s[keep], e[keep]
+    if s.size == 0:
+        return empty
+    order = np.argsort(s, kind="stable")
+    s, e = s[order], e[order]
+    out_s = [float(s[0])]
+    out_e = [float(e[0])]
+    for i in range(1, s.size):
+        if s[i] > out_e[-1]:
+            out_s.append(float(s[i]))
+            out_e.append(float(e[i]))
+        elif e[i] > out_e[-1]:
+            out_e[-1] = float(e[i])
+    return np.column_stack([out_s, out_e])
+
+
+def _intersection_len(a: np.ndarray, b: np.ndarray) -> float:
+    """Total length of the intersection of two sets of disjoint intervals.
+
+    Both `a` and `b` must be sorted, disjoint (m,2) arrays as returned by
+    :func:`merged_intervals`. Linear two-pointer sweep.
+    """
+    i = j = 0
+    total = 0.0
+    while i < len(a) and j < len(b):
+        lo = max(a[i, 0], b[j, 0])
+        hi = min(a[i, 1], b[j, 1])
+        if hi > lo:
+            total += hi - lo
+        # Advance whichever interval ends first.
+        if a[i, 1] < b[j, 1]:
+            i += 1
+        else:
+            j += 1
+    return total
+
+
 def pick_time_unit(span_ns: float) -> tuple[float, str]:
     """Return (divisor, label) mapping nanoseconds to a readable axis unit."""
     if span_ns >= 1e9:
@@ -161,6 +212,10 @@ def _selected_rows(
         rows = [(u, e) for (u, e) in rows if u in units]
     if engines:
         rows = [(u, e) for (u, e) in rows if e in engines]
+    else:
+        # Default "all metrics": drop aggregate lanes (e.g. ALL) so they neither
+        # add a redundant row nor inflate a unit-aggregate lane's busy time.
+        rows = [(u, e) for (u, e) in rows if e not in AGGREGATE_ENGINES]
     if aggregate == "unit":
         seen = []
         for u, _ in rows:
@@ -208,7 +263,12 @@ def render_timeline(
 
     for r, (unit, engine) in enumerate(rows):
         y = len(rows) - 1 - r  # first row at top
-        sel_engines = [engine] if engine else None
+        # For a unit-aggregate lane (engine is None) select every real engine but
+        # exclude aggregates like ALL, which would double-count the lane's busy.
+        sel_engines = (
+            [engine] if engine
+            else [e for e in td.engines if e not in AGGREGATE_ENGINES]
+        )
         m = td.mask(units=[unit], engines=sel_engines, window=(t0, t1))
         ts_r, dur_r = td.ts[m], td.dur[m]
         eng_r = td.engine_i[m]
@@ -301,26 +361,25 @@ def pairwise_overlap(
     a: tuple[str, str],
     b: tuple[str, str],
     window: tuple[float, float] | None = None,
-    nbins: int = 4000,
 ) -> dict:
     """Quantify how much two lanes are busy at the same time.
 
-    Uses fine occupancy binning as a fast approximation. Returns overlap time and
+    Exact: each lane's events are merged into disjoint busy intervals and the two
+    footprints are intersected directly (no binning). Returns overlap time and
     overlap as a fraction of each lane's own busy time (and of the window).
     """
     t0 = window[0] if window else td.t_min
     t1 = window[1] if window else td.t_max
     span = max(t1 - t0, 1e-12)
 
-    def occ(pair):
+    def intervals(pair):
         m = td.mask(units=[pair[0]], engines=[pair[1]], window=(t0, t1))
-        return _row_occupancy(td.ts[m], td.dur[m], t0, t1, nbins)
+        return merged_intervals(td.ts[m], td.dur[m], t0, t1)
 
-    oa, ob = occ(a), occ(b)
-    bin_w = span / nbins
-    busy_a = float(oa.sum() * bin_w)
-    busy_b = float(ob.sum() * bin_w)
-    overlap = float(np.minimum(oa, ob).sum() * bin_w)
+    ia, ib = intervals(a), intervals(b)
+    busy_a = float((ia[:, 1] - ia[:, 0]).sum()) if ia.size else 0.0
+    busy_b = float((ib[:, 1] - ib[:, 0]).sum()) if ib.size else 0.0
+    overlap = _intersection_len(ia, ib)
     return {
         "lane_a": f"{a[0]}/{a[1]}",
         "lane_b": f"{b[0]}/{b[1]}",

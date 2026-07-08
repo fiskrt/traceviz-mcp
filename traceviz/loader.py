@@ -21,6 +21,11 @@ import numpy as np
 
 from .model import InstrTable, TraceData
 
+# Chrome Trace Event Format records ts/dur at microsecond granularity. We store
+# nanoseconds internally, so scale on load. (The file's displayTimeUnit is only a
+# viewer display hint and does not change that ts/dur are microseconds.)
+US_TO_NS = 1000.0
+
 
 def _to_int(addr) -> int:
     """Parse a pc/address value that may be a hex string, int, or empty."""
@@ -79,8 +84,8 @@ def load_trace(path: str | Path, with_instr: bool = True) -> TraceData:
         unit_i[k] = intern(units, str(e.get("pid", "")))
         engine_i[k] = intern(engines, str(e.get("tid", "")))
         op_i[k] = intern(ops, str(e.get("name", "")))
-        ts[k] = float(e.get("ts", 0.0))
-        dur[k] = float(e.get("dur", 0.0))
+        ts[k] = float(e.get("ts", 0.0)) * US_TO_NS
+        dur[k] = float(e.get("dur", 0.0)) * US_TO_NS
         pc[k] = _to_int(e.get("args", {}).get("pc_addr"))
 
     instr = None

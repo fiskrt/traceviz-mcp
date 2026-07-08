@@ -27,8 +27,13 @@ from mcp.server.fastmcp import FastMCP, Image
 from pydantic import Field
 
 from .loader import find_trace_json, load_trace
+from .model import AGGREGATE_ENGINES
 from .render import pairwise_overlap, render_timeline
 from .stats import fragmentation_report
+
+# Axis-unit label -> nanoseconds-per-unit, for rendering summary numbers in the
+# same unit the timeline axis uses.
+_UNIT_DIV = {"ns": 1.0, "us": 1e3, "ms": 1e6, "s": 1e9}
 
 mcp = FastMCP(
     "traceviz",
@@ -77,9 +82,11 @@ def _window(td, start_ns, end_ns):
 
 
 def _summary_text(summary: dict) -> str:
+    unit = summary["time_unit"]
+    div = _UNIT_DIV.get(unit, 1.0)
     lines = [
         f"Timeline · {len(summary['rows'])} lanes · "
-        f"span {summary['span_ns']:.3f} ns (axis in {summary['time_unit']}). "
+        f"span {summary['span_ns'] / div:.3f} {unit}. "
         "A lane can look solid yet be many tiny ops — see events/runs.",
     ]
     for r in sorted(summary["rows"], key=lambda x: -x["busy_pct"]):
@@ -87,8 +94,9 @@ def _summary_text(summary: dict) -> str:
         frag = "  << fragmented" if ops_per_run >= 8 and r["n_events"] >= 16 else ""
         lines.append(
             f"  {r['unit']}/{r['engine']}: busy {r['busy_pct']:.1f}% "
-            f"({r['busy_ns']:.3f} ns); {r['n_events']} events in {r['n_segments']} "
-            f"runs = {ops_per_run:.0f} ops/run, mean {r['mean_op_ns']:.4f} ns/op{frag}"
+            f"({r['busy_ns'] / div:.3f} {unit}); {r['n_events']} events in "
+            f"{r['n_segments']} runs = {ops_per_run:.0f} ops/run, "
+            f"mean {r['mean_op_ns']:.2f} ns/op{frag}"
         )
     return "\n".join(lines)
 
@@ -100,18 +108,20 @@ def describe_trace(
     """List the cores, metrics (engine/pipe classes) and time span in a run.
 
     Call this first after a profiler run so you know which `cores` and `metrics`
-    names are valid and what nanosecond range the run covers.
+    names are valid and what nanosecond range the run covers. A valid lane for
+    the other tools is any `core/metric` pair, e.g. 'core2.veccore1/VECTOR'.
     """
     td = _load(path)
+    metrics = [e for e in td.engines if e not in AGGREGATE_ENGINES]
     return json.dumps(
         {
             "cores": td.units,
-            "metrics": td.engines,
-            "time_start_ns": td.t_min,
-            "time_end_ns": td.t_max,
-            "span_ns": td.span(),
+            "metrics": metrics,
+            "time_start_ns": round(td.t_min, 3),
+            "time_end_ns": round(td.t_max, 3),
+            "span_ns": round(td.span(), 3),
             "n_events": td.n,
-            "lanes": [f"{u}/{e}" for (u, e) in td.rows()],
+            "n_lanes": len(td.rows()),
         },
         indent=2,
     )

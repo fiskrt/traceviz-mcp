@@ -23,7 +23,7 @@ from collections import Counter
 
 import numpy as np
 
-from .model import TraceData
+from .model import AGGREGATE_ENGINES, TraceData
 from .render import busy_and_segments
 
 
@@ -95,6 +95,10 @@ def fragmentation_report(
         rows = [(u, e) for (u, e) in rows if u in units]
     if metrics:
         rows = [(u, e) for (u, e) in rows if e in metrics]
+    else:
+        # Default "all metrics": skip aggregate lanes (e.g. ALL); they are not a
+        # real coalescing target, just the sum of the physical pipes.
+        rows = [(u, e) for (u, e) in rows if e not in AGGREGATE_ENGINES]
     out = [
         lane_fragmentation(td, u, e, window, merge_gap_ns, top_ops) for (u, e) in rows
     ]

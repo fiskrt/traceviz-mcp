@@ -1,8 +1,10 @@
 """In-memory representation of a parsed profiler trace.
 
-All timestamps and durations are stored in nanoseconds (the profiler's native
-``displayTimeUnit``). Rendering code is responsible for choosing a human-facing
-unit (ns / us / ms) based on the span it is about to draw.
+All timestamps and durations are stored in nanoseconds. The on-disk Chrome Trace
+Event JSON records ``ts``/``dur`` in microseconds (per that format's spec; the
+file's ``displayTimeUnit`` is only a viewer hint and does not change the raw
+unit), so the loader converts to ns at read time. Rendering code is responsible
+for choosing a human-facing unit (ns / us / ms) based on the span it draws.
 """
 
 from __future__ import annotations
@@ -10,6 +12,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+
+# Pseudo engine/pipe classes that are aggregates of the real ones rather than a
+# physical pipe. The trace carries an "ALL" lane that spans every other engine;
+# treating it as a selectable metric double-counts busy time and event counts,
+# so it is hidden from discovery and excluded from "all metrics" defaults. It can
+# still be requested explicitly by name.
+AGGREGATE_ENGINES = frozenset({"ALL"})
 
 
 @dataclass

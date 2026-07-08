@@ -8,20 +8,106 @@ The LLM follows these steps:
 3. Uses `traceviz` mcp to visualize the timeline relevant to the change made
 4. Analyses timeline output from mcp and determines uses this information and return to step 1.
 
+## Questions the mcp can answer
+
+
+### Show an overview of the most important metrics for core2 vec1 and core1 vec0
+
+```bash
+python3 -m traceviz.cli $SAMPLE \
+    --units core2.veccore1 core1.veccore0 \
+    --engines SCALAR VECTOR MTE2 MTE3 \
+    --out out/img/compare.png
+```
+
+![compare](img/compare.png)
+
+### How does core7.veccore1's MTE2 access look?
+
+The loop's "zoom in on one thing" and analyse it:
+
+```bash
+python3 -m traceviz.cli $SAMPLE --units core7.veccore1 --engines MTE2 --out out/img/finegrained.png
+```
+
+![finegrained](img/finegrained.png)
+
+### Zoom to a time window
+
+`--window T0 T1` in nanoseconds; the x-axis unit adapts to the span shown.
+
+```bash
+python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 \
+    --engines SCALAR CUBE MTE2 --window 26 32 --out out/img/zoom.png
+```
+
+![zoom](img/zoom.png)
+
+### Can you just show me a combined one lane per core overview for all cores?
+
+```bash
+python3 -m traceviz.cli $SAMPLE --aggregate unit --out out/img/overview.png
+```
+
+![overview](img/overview.png)
+
+### Overlap — how much two lanes run at the same time (JSON)
+
+```bash
+python3 -m traceviz.cli $SAMPLE --overlap core2.veccore1/VECTOR core1.veccore0/VECTOR
+```
+
+```json
+{
+  "lane_a": "core2.veccore1/VECTOR",
+  "lane_b": "core1.veccore0/VECTOR",
+  "busy_a_ns": 6.487, "busy_b_ns": 6.486,
+  "overlap_ns": 6.467,
+  "overlap_pct_of_a": 99.69, "overlap_pct_of_b": 99.71,
+  "overlap_pct_of_window": 35.37
+}
+```
+
+### Fragmentation — find coalescing opportunities (JSON)
+
+```bash
+python3 -m traceviz.cli $SAMPLE --engines MTE2 --fragmentation
+```
+
+```json
+// most-fragmented lane first
+{
+  "lane": "core0.veccore0/MTE2",
+  "n_events": 34,
+  "n_segments": 8,
+  "ops_per_segment": 4.25,
+  "coalescable_ops": 26,
+  "mean_op_ns": 0.407,
+  "distinct_ops": 1,
+  "top_ops": [{"op": "MOV_SRC_TO_DST_ALIGN", "count": 34}]
+}
+```
+
+## Complete option list:
+
+| Flag | Meaning |
+|------|---------|
+| `path` (positional) | OPPROF dir, `simulator/` dir, or a `trace.json`. |
+| `--out PATH` | Output PNG (default `timeline.png`). |
+| `--units U ...` | Filter to these cores. |
+| `--engines E ...` | Filter to these metrics. |
+| `--window T0 T1` | Time window in nanoseconds. |
+| `--aggregate {row,unit}` | Lane per core+metric, or lane per core. |
+| `--width PX` | Output width (default 1600). |
+| `--overlap A/E B/E` | Print overlap stats for two lanes and exit. |
+| `--fragmentation` | Rank lanes by ops-per-run (coalescing opportunities) and exit. |
+| `--merge-gap NS` | Events within NS count as one run (for `--fragmentation`). |
+| `--list` | Print units/metrics/lanes and exit. |
+
 ---
 
-The MCP allows for more fine-grained access, for example:
-LLM saw an inbalance in cores, so it want to see how core 7 vector core 2 was improved in MTE2 access.
-The mcp will then return an timeline image over just these MTE2 acess on core 7 vector core 2.
-
-----
-
-
----
 
 ## Install mcp into Claude Code
-
-```
 
 `uvx` builds and runs the package straight from git:
 
@@ -269,101 +355,7 @@ python3 -m traceviz.cli $SAMPLE --list
 }
 ```
 
-### Overview — one lane per core, all 24 at once
 
-```bash
-python3 -m traceviz.cli $SAMPLE --aggregate unit --out out/img/overview.png
-```
-
-![overview](img/overview.png)
-
-### Compare cores across metrics
-
-```bash
-python3 -m traceviz.cli $SAMPLE \
-    --units core2.veccore1 core1.veccore0 \
-    --engines SCALAR VECTOR MTE2 MTE3 \
-    --out out/img/compare.png
-```
-
-![compare](img/compare.png)
-
-### Fine-grained — a single core's single metric
-
-The loop's "zoom in on one thing" case, e.g. *how does core7.veccore1's MTE2
-access look?*
-
-```bash
-python3 -m traceviz.cli $SAMPLE --units core7.veccore1 --engines MTE2 --out out/img/finegrained.png
-```
-
-![finegrained](img/finegrained.png)
-
-### Zoom to a time window
-
-`--window T0 T1` in nanoseconds; the x-axis unit adapts to the span shown.
-
-```bash
-python3 -m traceviz.cli $SAMPLE --units core0.cubecore0 \
-    --engines SCALAR CUBE MTE2 --window 26 32 --out out/img/zoom.png
-```
-
-![zoom](img/zoom.png)
-
-### Overlap — how much two lanes run at the same time (JSON)
-
-```bash
-python3 -m traceviz.cli $SAMPLE --overlap core2.veccore1/VECTOR core1.veccore0/VECTOR
-```
-
-```json
-{
-  "lane_a": "core2.veccore1/VECTOR",
-  "lane_b": "core1.veccore0/VECTOR",
-  "busy_a_ns": 6.487, "busy_b_ns": 6.486,
-  "overlap_ns": 6.467,
-  "overlap_pct_of_a": 99.69, "overlap_pct_of_b": 99.71,
-  "overlap_pct_of_window": 35.37
-}
-```
-
-### Fragmentation — find coalescing opportunities (JSON)
-
-```bash
-python3 -m traceviz.cli $SAMPLE --engines MTE2 --fragmentation
-```
-
-```json
-// most-fragmented lane first
-{
-  "lane": "core0.veccore0/MTE2",
-  "n_events": 34,
-  "n_segments": 8,
-  "ops_per_segment": 4.25,
-  "coalescable_ops": 26,
-  "mean_op_ns": 0.407,
-  "distinct_ops": 1,
-  "top_ops": [{"op": "MOV_SRC_TO_DST_ALIGN", "count": 34}]
-}
-```
-
-### CLI flags
-
-| Flag | Meaning |
-|------|---------|
-| `path` (positional) | OPPROF dir, `simulator/` dir, or a `trace.json`. |
-| `--out PATH` | Output PNG (default `timeline.png`). |
-| `--units U ...` | Filter to these cores. |
-| `--engines E ...` | Filter to these metrics. |
-| `--window T0 T1` | Time window in nanoseconds. |
-| `--aggregate {row,unit}` | Lane per core+metric, or lane per core. |
-| `--width PX` | Output width (default 1600). |
-| `--overlap A/E B/E` | Print overlap stats for two lanes and exit. |
-| `--fragmentation` | Rank lanes by ops-per-run (coalescing opportunities) and exit. |
-| `--merge-gap NS` | Events within NS count as one run (for `--fragmentation`). |
-| `--list` | Print units/metrics/lanes and exit. |
-
----
 
 ## Python API
 

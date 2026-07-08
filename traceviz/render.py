@@ -383,11 +383,11 @@ def pairwise_overlap(
     return {
         "lane_a": f"{a[0]}/{a[1]}",
         "lane_b": f"{b[0]}/{b[1]}",
-        "window_ns": [t0, t1],
-        "busy_a_ns": busy_a,
-        "busy_b_ns": busy_b,
-        "overlap_ns": overlap,
-        "overlap_pct_of_a": 100.0 * overlap / busy_a if busy_a else 0.0,
-        "overlap_pct_of_b": 100.0 * overlap / busy_b if busy_b else 0.0,
-        "overlap_pct_of_window": 100.0 * overlap / span,
+        "window_ns": [round(t0, 3), round(t1, 3)],
+        "busy_a_ns": round(busy_a, 3),
+        "busy_b_ns": round(busy_b, 3),
+        "overlap_ns": round(overlap, 3),
+        "overlap_pct_of_a": round(100.0 * overlap / busy_a, 2) if busy_a else 0.0,
+        "overlap_pct_of_b": round(100.0 * overlap / busy_b, 2) if busy_b else 0.0,
+        "overlap_pct_of_window": round(100.0 * overlap / span, 2),
     }

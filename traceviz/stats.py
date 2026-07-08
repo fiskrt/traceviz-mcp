@@ -49,7 +49,7 @@ def lane_fragmentation(
 
     if ts.size == 0:
         return {
-            "lane": lane, "window_ns": [t0, t1], "n_events": 0, "n_segments": 0,
+            "lane": lane, "n_events": 0, "n_segments": 0,
             "ops_per_segment": 0.0, "coalescable_ops": 0, "busy_ns": 0.0,
             "mean_op_ns": 0.0, "median_op_ns": 0.0, "min_op_ns": 0.0,
             "max_op_ns": 0.0, "distinct_ops": 0, "top_ops": [],
@@ -59,20 +59,22 @@ def lane_fragmentation(
     clipped = np.clip(ts + dur, t0, t1) - np.clip(ts, t0, t1)
     counts = Counter(td.ops[int(i)] for i in td.op_i[m])
 
+    # Numbers are rounded and top_ops is a compact "op:count" list to keep the
+    # per-lane record small (this is returned for many lanes at once). The window
+    # is constant across lanes, so it is not repeated here.
     return {
         "lane": lane,
-        "window_ns": [t0, t1],
         "n_events": int(ts.size),
         "n_segments": n_seg,
-        "ops_per_segment": ts.size / n_seg if n_seg else 0.0,
+        "ops_per_segment": round(ts.size / n_seg, 2) if n_seg else 0.0,
         "coalescable_ops": int(ts.size) - n_seg,
-        "busy_ns": busy,
-        "mean_op_ns": float(clipped.mean()),
-        "median_op_ns": float(np.median(clipped)),
-        "min_op_ns": float(clipped.min()),
-        "max_op_ns": float(clipped.max()),
+        "busy_ns": round(busy, 3),
+        "mean_op_ns": round(float(clipped.mean()), 3),
+        "median_op_ns": round(float(np.median(clipped)), 3),
+        "min_op_ns": round(float(clipped.min()), 3),
+        "max_op_ns": round(float(clipped.max()), 3),
         "distinct_ops": len(counts),
-        "top_ops": [{"op": nm, "count": c} for nm, c in counts.most_common(top_ops)],
+        "top_ops": [f"{nm}:{c}" for nm, c in counts.most_common(top_ops)],
     }
 
 

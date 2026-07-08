@@ -35,6 +35,15 @@ from .stats import fragmentation_report
 # same unit the timeline axis uses.
 _UNIT_DIV = {"ns": 1.0, "us": 1e3, "ms": 1e6, "s": 1e9}
 
+# The image shows every lane; the text digest only lists the busiest few so a
+# whole-chip render (150+ lanes) does not flood the caller's context.
+_MAX_SUMMARY_LANES = 40
+
+# Default cap on fragmentation lanes returned. The report is ranked worst-first,
+# so the top few are the actionable coalescing targets; returning every lane is
+# a large JSON dump. Callers can raise `limit` when they want the long tail.
+_DEFAULT_FRAG_LIMIT = 12
+
 mcp = FastMCP(
     "traceviz",
     instructions=(
@@ -84,12 +93,14 @@ def _window(td, start_ns, end_ns):
 def _summary_text(summary: dict) -> str:
     unit = summary["time_unit"]
     div = _UNIT_DIV.get(unit, 1.0)
-    lines = [
-        f"Timeline · {len(summary['rows'])} lanes · "
-        f"span {summary['span_ns'] / div:.3f} {unit}. "
-        "A lane can look solid yet be many tiny ops — see events/runs.",
-    ]
-    for r in sorted(summary["rows"], key=lambda x: -x["busy_pct"]):
+    n_lanes = len(summary["rows"])
+    ranked = sorted(summary["rows"], key=lambda x: -x["busy_pct"])
+    shown = ranked[:_MAX_SUMMARY_LANES]
+    head = f"Timeline · {n_lanes} lanes · span {summary['span_ns'] / div:.3f} {unit}."
+    if len(shown) < n_lanes:
+        head += f" Showing the {len(shown)} busiest below (image has all)."
+    lines = [head + " A lane can look solid yet be many tiny ops — see events/runs."]
+    for r in shown:
         ops_per_run = r["n_events"] / r["n_segments"] if r["n_segments"] else 0.0
         frag = "  << fragmented" if ops_per_run >= 8 and r["n_events"] >= 16 else ""
         lines.append(
@@ -98,6 +109,8 @@ def _summary_text(summary: dict) -> str:
             f"{r['n_segments']} runs = {ops_per_run:.0f} ops/run, "
             f"mean {r['mean_op_ns']:.2f} ns/op{frag}"
         )
+    if len(shown) < n_lanes:
+        lines.append(f"  … {n_lanes - len(shown)} more lanes (filter to see them).")
     return "\n".join(lines)
 
 
@@ -195,7 +208,7 @@ def fragmentation(
     start_ns: Annotated[float | None, Field(description="Window start in nanoseconds (optional).")] = None,
     end_ns: Annotated[float | None, Field(description="Window end in nanoseconds (optional).")] = None,
     merge_gap_ns: Annotated[float, Field(description="Events separated by <= this many ns count as one contiguous run.")] = 0.0,
-    limit: Annotated[int | None, Field(description="Return only the N most-fragmented lanes.")] = None,
+    limit: Annotated[int | None, Field(description="Return only the N most-fragmented lanes (default 20). Pass 0 for all.")] = None,
 ) -> str:
     """Find coalescing opportunities: lanes that are many tiny ops, not few big ones.
 
@@ -209,9 +222,11 @@ def fragmentation(
     """
     td = _load(path)
     window = _window(td, start_ns, end_ns)
+    # None -> default cap; explicit 0 -> no cap (return every lane).
+    eff_limit = _DEFAULT_FRAG_LIMIT if limit is None else (limit or None)
     report = fragmentation_report(
         td, units=cores, metrics=metrics, window=window,
-        merge_gap_ns=merge_gap_ns, limit=limit,
+        merge_gap_ns=merge_gap_ns, limit=eff_limit,
     )
     return json.dumps(report, indent=2)
 

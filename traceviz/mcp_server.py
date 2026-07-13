@@ -90,6 +90,23 @@ def _window(td, start_ns, end_ns):
     )
 
 
+def _output_path(image_out: str | None) -> tuple[str, bool]:
+    """Resolve where to render the PNG. Returns (path, keep).
+
+    With ``image_out`` set, the file is persisted at that path (``.png`` appended
+    if missing, parent directories created) and ``keep`` is True. Otherwise a
+    throwaway temp file is used and ``keep`` is False so the caller deletes it.
+    """
+    if not image_out:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
+            return fh.name, False
+    out = os.path.abspath(os.path.expanduser(image_out))
+    if not out.lower().endswith(".png"):
+        out += ".png"
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    return out, True
+
+
 def _summary_text(summary: dict) -> str:
     unit = summary["time_unit"]
     div = _UNIT_DIV.get(unit, 1.0)
@@ -148,18 +165,19 @@ def render_timeline_image(
     start_ns: Annotated[float | None, Field(description="Window start in nanoseconds (optional).")] = None,
     end_ns: Annotated[float | None, Field(description="Window end in nanoseconds (optional).")] = None,
     aggregate: Annotated[str, Field(description="'row' = one lane per (core, metric); 'unit' = one lane per core.")] = "row",
+    image_out: Annotated[str | None, Field(description="If given, also write the PNG to this path (e.g. 'imgs-viz/vec.png') so it persists on disk. '.png' is appended if missing and parent dirs are created. Omit to only return the image inline.")] = None,
 ) -> list:
     """Render a scale-adaptive timeline of the chosen cores and metrics.
 
     Returns a text summary (per-lane busy %) followed by a PNG image. The x-axis
     unit (ns/us/ms/s) is chosen automatically from the window. Idle time reads as
     white; busy time is colored by metric. Give `start_ns`/`end_ns` to zoom into
-    a hotspot.
+    a hotspot. Pass `image_out` to keep the PNG on disk (otherwise it is only
+    returned inline).
     """
     td = _load(path)
     window = _window(td, start_ns, end_ns)
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
-        out = fh.name
+    out, keep = _output_path(image_out)
     try:
         summary = render_timeline(
             td, out, units=cores, engines=metrics, window=window,
@@ -167,11 +185,15 @@ def render_timeline_image(
         )
         data = open(out, "rb").read()
     finally:
-        try:
-            os.unlink(out)
-        except OSError:
-            pass
-    return [_summary_text(summary), Image(data=data, format="png")]
+        if not keep:
+            try:
+                os.unlink(out)
+            except OSError:
+                pass
+    text = _summary_text(summary)
+    if keep:
+        text = f"Saved image to {out}\n{text}"
+    return [text, Image(data=data, format="png")]
 
 
 @mcp.tool()
